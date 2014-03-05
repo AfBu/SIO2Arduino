@@ -41,6 +41,10 @@ SdVolume volume;
 SdFile currDir;
 SdFile file; // TODO: make this unnecessary
 DiskDrive drive1;
+int sdfp = 0;
+String currentImage = "";
+String selectedImage = "";
+boolean selectorDown = false;
 #ifdef SELECTOR_BUTTON
 boolean isSwitchPressed = false;
 unsigned long lastSelectionPress;
@@ -68,6 +72,9 @@ void setup() {
   #endif
   #ifdef RESET_BUTTON
   pinMode(PIN_RESET, INPUT);
+  #endif
+  #ifdef ACTIVITY_LED
+  pinMode(PIN_ACTIVITY_LED, OUTPUT);
   #endif
 
   #ifdef LCD_DISPLAY
@@ -109,6 +116,13 @@ void setup() {
   #ifdef LCD_DISPLAY
     lcd.print("READY");
   #endif
+
+  /*  
+  if (mountFilename(0, "AUTORUN.ATR")) {
+    currentImage = "AUTORUN.ATR";
+    updateCurrentLcd();
+  }
+  */
 }
 
 void loop() {
@@ -117,10 +131,38 @@ void loop() {
   
   #ifdef SELECTOR_BUTTON
   // watch the selector button (accounting for debounce)
+  if (digitalRead(PIN_SELECTOR) == HIGH) {
+    if (!selectorDown) {
+      lastSelectionPress = millis();
+      selectorDown = true;
+    } else if (millis() - lastSelectionPress > 1000) {
+      if (currentImage != selectedImage) {
+        char tmp[13];
+        selectedImage.toCharArray(tmp, 13);
+        if (mountFilename(0, tmp)) {
+          currentImage = selectedImage;
+          updateCurrentLcd();
+        } else {
+          currentImage = "ERROR";
+          updateCurrentLcd();
+        }
+      }
+    }
+  } else {
+    if (selectorDown) {
+      unsigned long t = millis() - lastSelectionPress;
+      if (t < 1000) {
+        changeDisk(0);
+      }
+      selectorDown = false;
+    }
+  }
+  /*
   if (digitalRead(PIN_SELECTOR) == HIGH && millis() - lastSelectionPress > 250) {
     lastSelectionPress = millis();
     changeDisk(0);
   }
+  */
   #endif
   
   #ifdef RESET_BUTTON
@@ -194,20 +236,66 @@ void changeDisk(int deviceId) {
 
   while (!imageChanged) {
     // get next dir entry
-    int8_t result = currDir.readDir((dir_t*)&dir);
+    int8_t result;// = currDir.readDir((dir_t*)&dir);
+    
+    currDir.rewind();
+    for (int i = 0; i < sdfp; i++) {
+      result = currDir.readDir((dir_t*)&dir);
+    }
     
     // if we got back a 0, rewind the directory and get the first dir entry
     if (!result) {
       currDir.rewind();
       result = currDir.readDir((dir_t*)&dir);
+      sdfp = 0;
+    } else {
+      sdfp++;
     }
     
     // if we have a valid file response code, open it
     if (result > 0 && isValidFilename((char*)&dir.name)) {
       createFilename(name, (char*)dir.name);
-      imageChanged = mountFilename(deviceId, name);
+      //imageChanged = mountFilename(deviceId, name);
+      imageChanged = true;
+      selectedImage = name;//(char*)&dir.name;
+      updateCurrentLcd();
     }
   }
+}
+
+void updateCurrentLcd()
+{
+  lcd.clear();
+  lcd.print("D0: " + currentImage);
+  lcd.setCursor(0,1);
+  if (sdfp - 2 < 1) {
+    lcd.setCursor(5,1);
+    lcd.print("READY!");
+  } else {
+    lcd.print(sdfp - 2, DEC);
+    lcd.setCursor(4,1);
+    lcd.print(selectedImage);
+  }
+}
+
+void dbgPrint(String text)
+{
+  #ifdef LCD_DISPLAY
+  lcd.clear();
+  lcd.print(text);
+  lcd.setCursor(0,1);
+  #endif 
+  delay(1000);
+}
+
+void dbgPrintInt(int text)
+{
+  #ifdef LCD_DISPLAY
+  lcd.clear();
+  lcd.print(text, DEC);
+  lcd.setCursor(0,1);
+  #endif 
+  delay(1000);
 }
 
 boolean isValidFilename(char *s) {

@@ -35,7 +35,9 @@
 //#define ARDUINO_TEENSY          // PJRC Teensy 2.0
 
 // Uncomment this line if you are using an LCD display
-//#define LCD_DISPLAY
+#define LCD_DISPLAY
+
+#define ACTIVITY_LED
 
 // Uncomment this line if you are using a hardware button for image selection
 #define SELECTOR_BUTTON
@@ -47,7 +49,7 @@
 //#define ETHERNET_SHIELD
 
 // uncomment for PRO image format support
-//#define PRO_IMAGES
+#define PRO_IMAGES
 
 // uncomment for ATX image format support (Mega 2560 only)
 //#define ATX_IMAGES
@@ -62,6 +64,10 @@
 /*
  * These are the Arduino pin definitions.
  */
+
+#ifdef ACTIVITY_LED
+  #define PIN_ACTIVITY_LED      A0
+#endif
  
 #ifdef ARDUINO_TEENSY
   #define PIN_ATARI_CMD         4    // the Atari SIO command line - usually the purple wire on the SIO cable

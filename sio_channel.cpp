@@ -55,6 +55,9 @@ void SIOChannel::runCycle() {
         m_startTimeoutInterval = millis();
         // if command frame is fully read...
         if (m_cmdFramePtr - (byte*)&m_cmdFrame == COMMAND_FRAME_SIZE) {
+          #ifdef ACTIVITY_LED
+            digitalWrite(PIN_ACTIVITY_LED, HIGH);
+          #endif
           dumpCommandFrame();
           // process command frame
           if (isChecksumValid() && isCommandForThisDevice()) {
@@ -71,6 +74,9 @@ void SIOChannel::runCycle() {
         } else if (millis() - m_startTimeoutInterval > READ_CMD_TIMEOUT) {
           m_cmdPinState = STATE_WAIT_CMD_START;
         }
+          #ifdef ACTIVITY_LED
+            digitalWrite(PIN_ACTIVITY_LED, LOW);
+          #endif
         break;
       case STATE_READ_DATAFRAME:
         // check for timeout
