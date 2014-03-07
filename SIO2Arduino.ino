@@ -28,6 +28,9 @@
 #include "disk_drive.h"
 #ifdef LCD_DISPLAY
 #include <LiquidCrystal.h>
+#ifdef SHOW_FREE_MEMORY
+#include <MemoryFree.h>
+#endif
 #endif
 
 /**
@@ -39,29 +42,31 @@ SIOChannel sioChannel(PIN_ATARI_CMD, &SIO_UART, &driveAccess, &driveControl);
 Sd2Card card;
 SdVolume volume;
 SdFile currDir;
-SdFile file; // TODO: make this unnecessary
-DiskDrive drive1;
-int sdfp = 0;
-String currentImage = "";
-String selectedImage = "";
-boolean selectorDown = false;
+SdFile files[DRIVES_COUNT];
+DiskDrive drives[DRIVES_COUNT];
+String names[DRIVES_COUNT];
 #ifdef SELECTOR_BUTTON
-boolean isSwitchPressed = false;
 unsigned long lastSelectionPress;
-boolean isFileOpened;
+boolean selectionPress = false;
+unsigned long lastSelectionDrivePress;
 #endif
 #ifdef RESET_BUTTON
 unsigned long lastResetPress;
 #endif
 #ifdef LCD_DISPLAY
 LiquidCrystal lcd(PIN_LCD_RD,PIN_LCD_ENABLE,PIN_LCD_DB4,PIN_LCD_DB5,PIN_LCD_DB6,PIN_LCD_DB7);
+boolean lcdUpdate = true;
 #endif
 
+unsigned int selectedDrive = 0;
+int selectedFileIndex = 0;
+boolean mounted = false;
+
 void setup() {
-#ifdef DEBUG
-  // set up logging serial port
-  LOGGING_UART.begin(115200);
-#endif
+  #ifdef DEBUG
+    // set up logging serial port
+    LOGGING_UART.begin(115200);
+  #endif
 
   // initialize serial port to Atari
   SIO_UART.begin(19200);
@@ -69,6 +74,7 @@ void setup() {
   // set pin modes
   #ifdef SELECTOR_BUTTON
   pinMode(PIN_SELECTOR, INPUT);
+  pinMode(PIN_SELECTOR_DRIVE, INPUT);
   #endif
   #ifdef RESET_BUTTON
   pinMode(PIN_RESET, INPUT);
@@ -80,49 +86,42 @@ void setup() {
   #ifdef LCD_DISPLAY
   // set up LCD if appropriate
   lcd.begin(16, 2);
-  lcd.print("SIO2Arduino");
+  lcd.print("SIO2Arduino+");
   lcd.setCursor(0,1);
   #endif
 
   // initialize SD card
-  LOG_MSG("Initializing SD card...");
+  LOG_MSG(TXT_SDINIT);
   pinMode(PIN_SD_CS, OUTPUT);
 
   if (!card.init(SPI_HALF_SPEED, PIN_SD_CS)) {
-    LOG_MSG_CR(" failed.");
+    LOG_MSG_CR(TXT_FAILED);
     #ifdef LCD_DISPLAY
-      lcd.print("SD Init Error");
+      lcd.print(TXT_SDERROR);
     #endif     
     return;
   }
   
   if (!volume.init(&card)) {
-    LOG_MSG_CR(" failed.");
+    LOG_MSG_CR(TXT_FAILED);
     #ifdef LCD_DISPLAY
-      lcd.print("SD Volume Error");
+      lcd.print(TXT_SDVOLERR);
     #endif     
     return;
   }
 
   if (!currDir.openRoot(&volume)) {
-    LOG_MSG_CR(" failed.");
+    LOG_MSG_CR(TXT_FAILED);
     #ifdef LCD_DISPLAY
-      lcd.print("SD Root Error");
+      lcd.print(TXT_SDROOTERR);
     #endif     
     return;
   }
 
-  LOG_MSG_CR(" done.");
+  LOG_MSG_CR(TXT_DONE);
   #ifdef LCD_DISPLAY
-    lcd.print("READY");
+    lcd.print(TXT_READY);
   #endif
-
-  /*  
-  if (mountFilename(0, "AUTORUN.ATR")) {
-    currentImage = "AUTORUN.ATR";
-    updateCurrentLcd();
-  }
-  */
 }
 
 void loop() {
@@ -130,39 +129,7 @@ void loop() {
   sioChannel.runCycle();
   
   #ifdef SELECTOR_BUTTON
-  // watch the selector button (accounting for debounce)
-  if (digitalRead(PIN_SELECTOR) == HIGH) {
-    if (!selectorDown) {
-      lastSelectionPress = millis();
-      selectorDown = true;
-    } else if (millis() - lastSelectionPress > 1000) {
-      if (currentImage != selectedImage) {
-        char tmp[13];
-        selectedImage.toCharArray(tmp, 13);
-        if (mountFilename(0, tmp)) {
-          currentImage = selectedImage;
-          updateCurrentLcd();
-        } else {
-          currentImage = "ERROR";
-          updateCurrentLcd();
-        }
-      }
-    }
-  } else {
-    if (selectorDown) {
-      unsigned long t = millis() - lastSelectionPress;
-      if (t < 1000) {
-        changeDisk(0);
-      }
-      selectorDown = false;
-    }
-  }
-  /*
-  if (digitalRead(PIN_SELECTOR) == HIGH && millis() - lastSelectionPress > 250) {
-    lastSelectionPress = millis();
-    changeDisk(0);
-  }
-  */
+  processSelector();
   #endif
   
   #ifdef RESET_BUTTON
@@ -173,11 +140,99 @@ void loop() {
   }
   #endif
   
+  #ifdef LCD_DISPLAY
+  if (lcdUpdate) {
+    lcdUpdate = false;
+    updateLcd();
+  }
+  #endif
+  
   #ifdef ARDUINO_TEENSY
     if (SIO_UART.available())
       SIO_CALLBACK();
   #endif
 }
+
+boolean isSelectedDir()
+{
+  if (selectedFileIndex == -1) return true;
+  
+  FileEntry entries[1];
+  char name[13];
+  if (getFileList(selectedFileIndex, 1, entries) <= 0) return false;
+  return entries[0].isDirectory;
+}
+
+String getSelectedFile()
+{
+  if (selectedFileIndex == -1) return "..";
+  
+  FileEntry entries[1];
+  char name[13];
+  if (getFileList(selectedFileIndex, 1, entries) <= 0) return "/EOD";
+  createFilename(name, entries[0].name);
+  
+  return String(name);
+}
+
+#ifdef LCD_DISPLAY
+void updateLcd()
+{
+  lcd.clear();
+  lcd.print("D" + String(selectedDrive+1) + ":" + names[selectedDrive]);
+  if (selectedFileIndex >= 0) {
+    lcd.setCursor(0, 1);
+    lcd.print(selectedFileIndex, DEC);
+  }
+  lcd.setCursor(3, 1);
+  lcd.print(getSelectedFile());
+  #ifdef SHOW_FREE_MEMORY
+  lcd.setCursor(0, 0);
+  lcd.print(freeMemory(), DEC);
+  #endif
+}
+#endif
+
+#ifdef SELECTOR_BUTTON
+void processSelector()
+{
+  if (digitalRead(PIN_SELECTOR_DRIVE) == HIGH) {
+    if (!selectionPress) {
+      selectionPress = true;
+      lastSelectionPress = millis();
+    } else {
+      if (millis() - lastSelectionPress > 1000 && !mounted) {
+        mounted = true;
+        if (isSelectedDir()) {
+          changeDirectory(selectedFileIndex);
+          selectedFileIndex = 0;
+        } else {
+          mountFileIndex(selectedDrive, selectedFileIndex);
+        }
+        lcdUpdate = true;
+        lastSelectionPress = millis() + 1000;
+      }
+    }
+  } else {
+    if (selectionPress) {
+      if (millis() - lastSelectionPress < 250) {
+        selectedDrive++;
+        if (selectedDrive == DRIVES_COUNT) selectedDrive = 0;
+        lcdUpdate = true;
+      }
+      selectionPress = false;
+      mounted = false;
+    }
+  }
+
+  if (digitalRead(PIN_SELECTOR) == HIGH && millis() - lastSelectionPress > 250) {
+    lastSelectionPress = millis();
+    selectedFileIndex++;
+    if (getSelectedFile() == "/EOD") selectedFileIndex = (currDir.isRoot() ? 0 : -1);
+    lcdUpdate = true;
+  }
+}
+#endif
 
 void SIO_CALLBACK() {
   // inform the SIO channel that an incoming byte is available
@@ -185,121 +240,53 @@ void SIO_CALLBACK() {
 }
 
 DriveStatus* getDeviceStatus(int deviceId) {
-  return drive1.getStatus();
+  return drives[deviceId].getStatus();
 }
 
 SectorDataInfo* readSector(int deviceId, unsigned long sector, byte *data) {
-  if (drive1.hasImage()) {
-    return drive1.getSectorData(sector, data);
+  if (drives[deviceId].hasImage()) {
+    return drives[deviceId].getSectorData(sector, data);
   } else {
     return NULL;
   }
 }
 
 boolean writeSector(int deviceId, unsigned long sector, byte* data, unsigned long length) {
-  return (drive1.writeSectorData(sector, data, length) == length);
+  return (drives[deviceId].writeSectorData(sector, data, length) == length);
 }
 
 boolean format(int deviceId, int density) {
   char name[13];
   
   // get current filename
-  file.getFilename(name);
+  files[deviceId].getFilename(name);
 
   // close and delete the current file
-  file.close();
-  file.remove();
+  files[deviceId].close();
+  files[deviceId].remove();
 
   LOG_MSG("Remove old file: ");
   LOG_MSG_CR(name);
 
   // open new file for writing
-  file.open(&currDir, name, O_RDWR | O_SYNC | O_CREAT);
+  files[deviceId].open(&currDir, name, O_RDWR | O_SYNC | O_CREAT);
 
   LOG_MSG("Created new file: ");
   LOG_MSG_CR(name);
 
   // allow the virtual drive to format the image (and possibly alter its size)
-  if (drive1.formatImage(&file, density)) {
+  if (drives[deviceId].formatImage(&files[deviceId], density)) {
     // set the new image file for the drive
-    drive1.setImageFile(&file);
+    drives[deviceId].setImageFile(&files[deviceId]);
     return true;
   } else {
     return false;
   }  
 }
 
-void changeDisk(int deviceId) {
-  dir_t dir;
-  char name[13];
-  boolean imageChanged = false;
-
-  while (!imageChanged) {
-    // get next dir entry
-    int8_t result;// = currDir.readDir((dir_t*)&dir);
-    
-    currDir.rewind();
-    for (int i = 0; i < sdfp; i++) {
-      result = currDir.readDir((dir_t*)&dir);
-    }
-    
-    // if we got back a 0, rewind the directory and get the first dir entry
-    if (!result) {
-      currDir.rewind();
-      result = currDir.readDir((dir_t*)&dir);
-      sdfp = 0;
-    } else {
-      sdfp++;
-    }
-    
-    // if we have a valid file response code, open it
-    if (result > 0 && isValidFilename((char*)&dir.name)) {
-      createFilename(name, (char*)dir.name);
-      //imageChanged = mountFilename(deviceId, name);
-      imageChanged = true;
-      selectedImage = name;//(char*)&dir.name;
-      updateCurrentLcd();
-    }
-  }
-}
-
-void updateCurrentLcd()
-{
-  lcd.clear();
-  lcd.print("D0: " + currentImage);
-  lcd.setCursor(0,1);
-  if (sdfp - 2 < 1) {
-    lcd.setCursor(5,1);
-    lcd.print("READY!");
-  } else {
-    lcd.print(sdfp - 2, DEC);
-    lcd.setCursor(4,1);
-    lcd.print(selectedImage);
-  }
-}
-
-void dbgPrint(String text)
-{
-  #ifdef LCD_DISPLAY
-  lcd.clear();
-  lcd.print(text);
-  lcd.setCursor(0,1);
-  #endif 
-  delay(1000);
-}
-
-void dbgPrintInt(int text)
-{
-  #ifdef LCD_DISPLAY
-  lcd.clear();
-  lcd.print(text, DEC);
-  lcd.setCursor(0,1);
-  #endif 
-  delay(1000);
-}
-
 boolean isValidFilename(char *s) {
-  return (  s[0] != '.' &&    // ignore hidden files 
+  return (  !(s[0] == 'S' && s[1] == 'Y' && s[2] == 'S' && s[3] == 'T' && s[4] == 'E' && s[5] == 'M' /*&& s[6] == '~'*/ && s[7] == '1') && // ignore windows system directory
+            s[0] != '.' &&    // ignore hidden files 
             s[0] != '_' && (  // ignore bogus files created by OS X
              (s[8] == 'A' && s[9] == 'T' && s[10] == 'R')
           || (s[8] == 'X' && s[9] == 'F' && s[10] == 'D')
@@ -349,7 +336,8 @@ int getFileList(int startIndex, int count, FileEntry *entries) {
     if (currDir.readDir((dir_t*)&dir) < 1) {
       break;
     }
-    if (isValidFilename((char*)&dir.name) || (DIR_IS_SUBDIR(&dir) && dir.name[0] != '.')) {
+    // dir.attributes != 22 hides windows's system folders 
+    if (isValidFilename((char*)&dir.name) || (DIR_IS_SUBDIR(&dir) && dir.name[0] != '.' && dir.attributes != 22)) {
       if (currentEntry >= startIndex) {
         memcpy(entries[ix].name, dir.name, 11);
         if (DIR_IS_SUBDIR(&dir)) {
@@ -417,17 +405,17 @@ void mountFileIndex(int deviceId, int ix) {
  */
 boolean mountFilename(int deviceId, char *name) {
   // close previously open file
-  if (file.isOpen()) {
-    file.close();
+  if (files[deviceId].isOpen()) {
+    files[deviceId].close();
   }
   
-  if (file.open(&currDir, name, O_RDWR | O_SYNC) && drive1.setImageFile(&file)) {
+  if (files[deviceId].open(&currDir, name, O_RDWR | O_SYNC) && drives[deviceId].setImageFile(&files[deviceId])) {
     LOG_MSG_CR(name);
 
+    names[deviceId] = String(name);
+
     #ifdef LCD_DISPLAY
-    lcd.clear();
-    lcd.print(name);
-    lcd.setCursor(0,1);
+    lcdUpdate = true;
     #endif
 
     return true;

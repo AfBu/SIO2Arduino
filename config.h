@@ -27,6 +27,14 @@
  * These are SIO2Arduino feature definitions.
  */
 
+// number of drives (limit for arduino UNO is 2! Higher value will cause memory depletion and unstable behavior)
+#define DRIVES_COUNT      2
+
+// language - leave only one language uncommented
+// #define LNG_EN // English
+#define LNG_CZ // Czech
+// #define LNG_DE // Deutsch
+
 // These are the Arduino devices that can be used. I'm sure others would work,
 // but these are the only ones I have to test with. Only one of these should
 // be uncommented.
@@ -38,6 +46,8 @@
 #define LCD_DISPLAY
 
 #define ACTIVITY_LED
+
+//#define SHOW_FREE_MEMORY
 
 // Uncomment this line if you are using a hardware button for image selection
 #define SELECTOR_BUTTON
@@ -101,6 +111,7 @@
 
 #ifdef SELECTOR_BUTTON
   #define PIN_SELECTOR        3    // the selector button pin
+  #define PIN_SELECTOR_DRIVE  A1   // the selector drive button pin
 #endif
 
 #ifdef RESET_BUTTON
@@ -148,6 +159,37 @@
 #else
   #define LOG_MSG(...)
   #define LOG_MSG_CR(...)
+#endif
+
+/**
+ * Language definitions
+ */
+#ifdef LNG_EN
+  #define TXT_SDINIT       "Initializing SD card..."
+  #define TXT_SDERROR      "SD Init Error"
+  #define TXT_SDVOLERR     "SD Volume Error"
+  #define TXT_SDROOTERR    "SD Root Error"
+  #define TXT_FAILED       " failed."
+  #define TXT_DONE         " done."
+  #define TXT_READY        "READY"
+#endif
+#ifdef LNG_CZ
+  #define TXT_SDINIT       "Inicializace SD karty..."
+  #define TXT_SDERROR      "SD Init Error"
+  #define TXT_SDVOLERR     "SD Volume Error"
+  #define TXT_SDROOTERR    "SD Root Error"
+  #define TXT_FAILED       " selhalo."
+  #define TXT_DONE         " dokonceno."
+  #define TXT_READY        "PRIPRAVEN"
+#endif
+#ifdef LNG_DE
+  #define TXT_SDINIT       "Initializing SD card..."
+  #define TXT_SDERROR      "SD Init Error"
+  #define TXT_SDVOLERR     "SD Volume Error"
+  #define TXT_SDROOTERR    "SD Root Error"
+  #define TXT_FAILED       " failed."
+  #define TXT_DONE         " done."
+  #define TXT_READY        "READY"
 #endif
 
 #endif

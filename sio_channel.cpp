@@ -157,7 +157,7 @@ boolean SIOChannel::isChecksumValid() {
 
 boolean SIOChannel::isCommandForThisDevice() {
   // we only emulate drive 1 right now
-  return (m_cmdFrame.deviceId == DEVICE_D1 || m_cmdFrame.deviceId == DEVICE_SDRIVE);
+  return (m_cmdFrame.deviceId == DEVICE_D1 || m_cmdFrame.deviceId == DEVICE_D2 || m_cmdFrame.deviceId == DEVICE_D3 || m_cmdFrame.deviceId == DEVICE_D4 || m_cmdFrame.deviceId == DEVICE_SDRIVE);
 }
 
 boolean SIOChannel::isValidCommand() {
@@ -206,7 +206,12 @@ byte SIOChannel::checksum(byte* chunk, int length) {
 }
 
 byte SIOChannel::processCommand() {
-  int deviceId = 1;
+  int deviceId = 0;
+  if (m_cmdFrame.deviceId == DEVICE_D1) deviceId = 0;
+  if (m_cmdFrame.deviceId == DEVICE_D2) deviceId = 1;
+  if (m_cmdFrame.deviceId == DEVICE_D3) deviceId = 2;
+  if (m_cmdFrame.deviceId == DEVICE_D4) deviceId = 3;
+  
   byte nextCmdPinState = STATE_WAIT_CMD_END;
   
   switch (m_cmdFrame.command) {
