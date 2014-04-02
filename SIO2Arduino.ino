@@ -252,10 +252,17 @@ SectorDataInfo* readSector(int deviceId, unsigned long sector, byte *data) {
 }
 
 boolean writeSector(int deviceId, unsigned long sector, byte* data, unsigned long length) {
-  return (drives[deviceId].writeSectorData(sector, data, length) == length);
+  if (deviceId > 0) deviceId--;
+  if (drives[deviceId].hasImage()) {
+    return (drives[deviceId].writeSectorData(sector, data, length) == length);
+  } else {
+    return false;
+  }
 }
 
 boolean format(int deviceId, int density) {
+  if (deviceId > 0) deviceId--;
+
   char name[13];
   
   // get current filename
